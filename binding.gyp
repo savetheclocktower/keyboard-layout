@@ -2,11 +2,21 @@
   "targets": [
     {
       "target_name": "keyboard-layout-manager",
+      "cflags!": ["-fno-exceptions"],
+      "cflags_cc!": ["-fno-exceptions"],
+      "xcode_settings": {
+        "GCC_ENABLE_CPP_EXCEPTIONS": "YES",
+        "CLANG_CXX_LIBRARY": "libc++",
+        "MACOSX_DEPLOYMENT_TARGET": "10.7",
+      },
+      "msvs_settings": {
+        "VCCLCompilerTool": {"ExceptionHandling": 1},
+      },
       "sources": [
         "src/keyboard-layout-manager.cc"
       ],
       "include_dirs": [
-        "<!(node -e \"require('nan')\")",
+        "<!(node -p \"require('node-addon-api').include_dir\")",
         "chrome_headers",
       ],
       "conditions": [
@@ -26,7 +36,7 @@
           ],
           'msvs_settings': {
             'VCCLCompilerTool': {
-              'ExceptionHandling': 1, # /EHsc
+              'ExceptionHandling': 1,  # /EHsc
               'WarnAsError': 'true',
             },
           },
@@ -37,7 +47,8 @@
             4267,  # conversion from 'size_t' to 'type', possible loss of data
             4302,  # 'type cast': truncation from 'HKL' to 'UINT'
             4311,  # 'type cast': pointer truncation from 'HKL' to 'UINT'
-            4530,  # C++ exception handler used, but unwind semantics are not enabled
+            4530,  # C++ exception handler used, but unwind semantics are not
+                   # enabled
             4506,  # no definition for inline function
             4577,  # 'noexcept' used with no exception handling mode specified
             4996,  # function was declared deprecated
@@ -58,6 +69,7 @@
             "src/keyboard-layout-manager-linux.cc",
           ],
           "include_dirs": [
+            "<!(node -p \"require('node-addon-api').include_dir\")",
             "/usr/local/include", "/usr/local/include/X11",
           ],
           "ldflags": [

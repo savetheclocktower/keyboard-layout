@@ -6,19 +6,17 @@
 #include <vector>
 #include <string>
 #include <cctype>
+#include <iostream>
 
-using namespace v8;
-
-uv_loop_t *loop = uv_default_loop();
-uv_async_t async;
-
-static void notificationHandler(CFNotificationCenterRef center, void *manager, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-  async.data = manager;
-  uv_async_send(&async);
-}
-
-static void asyncSendHandler(uv_async_t *handle) {
-  (static_cast<KeyboardLayoutManager *>(handle->data))->HandleKeyboardLayoutChanged();
+static void NotificationHandler(
+  CFNotificationCenterRef center,
+  void *manager,
+  CFStringRef name,
+  const void *object,
+  CFDictionaryRef userInfo
+) {
+  std::cout << "NotificationHandler" << std::endl;
+  (static_cast<KeyboardLayoutManager *>(manager))->OnNotificationReceived();
 }
 
 static void RemoveCFObserver(void *arg) {
@@ -31,45 +29,30 @@ static void RemoveCFObserver(void *arg) {
   );
 }
 
-KeyboardLayoutManager::KeyboardLayoutManager(v8::Isolate *isolate, Nan::Callback *callback) : isolate_(isolate), callback(callback) {
-  uv_async_init(loop, &async, (uv_async_cb) asyncSendHandler);
+void KeyboardLayoutManager::PlatformTeardown() {
+  RemoveCFObserver(this);
+}
+
+void KeyboardLayoutManager::PlatformSetup(const Napi::CallbackInfo& info) {
+  std::cout << "PlatformSetup" << std::endl;
 
   CFNotificationCenterAddObserver(
-      CFNotificationCenterGetDistributedCenter(),
-      this,
-      notificationHandler,
-      kTISNotifySelectedKeyboardInputSourceChanged,
-      NULL,
-      CFNotificationSuspensionBehaviorDeliverImmediately
+    CFNotificationCenterGetDistributedCenter(),
+    this,
+    NotificationHandler,
+    kTISNotifySelectedKeyboardInputSourceChanged,
+    NULL,
+    CFNotificationSuspensionBehaviorDeliverImmediately
   );
-
-#if NODE_MAJOR_VERSION >= 10
-  node::AddEnvironmentCleanupHook(
-    isolate,
-    RemoveCFObserver,
-    const_cast<void*>(static_cast<const void*>(nullptr)));
-#endif
 }
-
-KeyboardLayoutManager::~KeyboardLayoutManager() {
-#if NODE_MAJOR_VERSION >= 10
-  node::RemoveEnvironmentCleanupHook(
-    isolate(),
-    RemoveCFObserver,
-    const_cast<void*>(static_cast<const void*>(this))
-  );
-#endif
-  RemoveCFObserver(this);
-  delete callback;
-};
 
 void KeyboardLayoutManager::HandleKeyboardLayoutChanged() {
-  Nan::AsyncResource async_resource("keyboard_layout:HandleKeyboardLayoutChanged");
-  callback->Call(0, NULL, &async_resource);
+  // no-op
 }
 
-NAN_METHOD(KeyboardLayoutManager::GetInstalledKeyboardLanguages) {
-  Nan::HandleScope scope;
+Napi::Value KeyboardLayoutManager::GetInstalledKeyboardLanguages(const Napi::CallbackInfo& info) {
+  auto env = info.Env();
+  Napi::HandleScope scope(env);
 
   @autoreleasepool {
     std::vector<std::string> ret;
@@ -98,31 +81,35 @@ NAN_METHOD(KeyboardLayoutManager::GetInstalledKeyboardLanguages) {
       ret.push_back(str);
     }
 
-    Local<Array> result = Nan::New<Array>(ret.size());
-    for (size_t i = 0; i < ret.size(); ++i) {
-       const std::string& lang = ret[i];
-       Nan::Set(result, i, Nan::New<String>(lang.data(), lang.size()).ToLocalChecked());
+    auto result = Napi::Array::New(env);
+
+    for (size_t i = 0; i < ret.size(); i++) {
+      const std::string& lang = ret[i];
+      result.Set(i, Napi::String::New(env, lang.data(), lang.size()));
     }
 
-    info.GetReturnValue().Set(result);
+    return result;
   }
 }
 
-NAN_METHOD(KeyboardLayoutManager::GetCurrentKeyboardLanguage) {
-  Nan::HandleScope scope;
+Napi::Value KeyboardLayoutManager::GetCurrentKeyboardLanguage(const Napi::CallbackInfo& info) {
+  auto env = info.Env();
   TISInputSourceRef source = TISCopyCurrentKeyboardInputSource();
 
   NSArray* langs = (NSArray*) TISGetInputSourceProperty(source, kTISPropertyInputSourceLanguages);
   NSString* lang = (NSString*) [langs objectAtIndex:0];
 
-  info.GetReturnValue().Set(Nan::New([lang UTF8String]).ToLocalChecked());
+  return Napi::String::New(env, [lang UTF8String]);
 }
 
-NAN_METHOD(KeyboardLayoutManager::GetCurrentKeyboardLayout) {
-  Nan::HandleScope scope;
+Napi::Value KeyboardLayoutManager::GetCurrentKeyboardLayout(const Napi::CallbackInfo& info) {
+  return GetCurrentKeyboardLayout(info.Env());
+}
+
+Napi::Value KeyboardLayoutManager::GetCurrentKeyboardLayout(Napi::Env env) {
   TISInputSourceRef source = TISCopyCurrentKeyboardInputSource();
   CFStringRef sourceId = (CFStringRef) TISGetInputSourceProperty(source, kTISPropertyInputSourceID);
-  info.GetReturnValue().Set(Nan::New([(NSString *)sourceId UTF8String]).ToLocalChecked());
+  return Napi::String::New(env, [(NSString *)sourceId UTF8String]);
 }
 
 struct KeycodeMapEntry {
@@ -135,7 +122,12 @@ struct KeycodeMapEntry {
 
 #include "keycode_converter_data.inc"
 
-Local<Value> CharacterForNativeCode(const UCKeyboardLayout* keyboardLayout, UInt16 virtualKeyCode, EventModifiers modifiers) {
+Napi::Value CharacterForNativeCode(
+  Napi::Env env,
+  const UCKeyboardLayout* keyboardLayout,
+  UInt16 virtualKeyCode,
+  EventModifiers modifiers
+) {
   // See https://developer.apple.com/reference/coreservices/1390584-uckeytranslate?language=objc
   UInt32 modifierKeyState = (modifiers >> 8) & 0xFF;
   UInt32 deadKeyState = 0;
@@ -170,52 +162,46 @@ Local<Value> CharacterForNativeCode(const UCKeyboardLayout* keyboardLayout, UInt
   }
 
   if (status == noErr && !std::iscntrl(characters[0])) {
-    return Nan::New(static_cast<const uint16_t *>(characters), static_cast<int>(charCount)).ToLocalChecked();
+    return Napi::String::New(env, reinterpret_cast<const char16_t*>(characters), static_cast<size_t>(charCount));
   } else {
-    return Nan::Null();
+    return env.Null();
   }
 }
 
-NAN_METHOD(KeyboardLayoutManager::GetCurrentKeymap) {
+Napi::Value KeyboardLayoutManager::GetCurrentKeymap(const Napi::CallbackInfo& info) {
+  auto env = info.Env();
+  std::cout << "GetCurrentKeymap" << std::endl;
   TISInputSourceRef source = TISCopyCurrentKeyboardLayoutInputSource();
   CFDataRef layoutData = static_cast<CFDataRef>(TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData));
 
-  if (layoutData == NULL) {
-    info.GetReturnValue().Set(Nan::Null());
-    return;
-  }
+  if (layoutData == NULL) return env.Null();
 
   const UCKeyboardLayout* keyboardLayout = reinterpret_cast<const UCKeyboardLayout*>(CFDataGetBytePtr(layoutData));
-
-  Local<Object> result = Nan::New<Object>();
-  Local<String> unmodifiedKey = Nan::New("unmodified").ToLocalChecked();
-  Local<String> withShiftKey = Nan::New("withShift").ToLocalChecked();
-  Local<String> withAltGraphKey = Nan::New("withAltGraph").ToLocalChecked();
-  Local<String> withAltGraphShiftKey = Nan::New("withAltGraphShift").ToLocalChecked();
-
+  auto result = Napi::Object::New(env);
   size_t keyCodeMapSize = sizeof(keyCodeMap) / sizeof(keyCodeMap[0]);
+
   for (size_t i = 0; i < keyCodeMapSize; i++) {
     const char *dom3Code = keyCodeMap[i].dom3Code;
     int virtualKeyCode = keyCodeMap[i].virtualKeyCode;
     if (dom3Code && virtualKeyCode < 0xffff) {
-      Local<String> dom3CodeKey = Nan::New(dom3Code).ToLocalChecked();
+      auto dom3CodeKey = Napi::String::New(env, dom3Code);
 
-      Local<Value> unmodified = CharacterForNativeCode(keyboardLayout, virtualKeyCode, 0);
-      Local<Value> withShift = CharacterForNativeCode(keyboardLayout, virtualKeyCode, (1 << shiftKeyBit));
-      Local<Value> withAltGraph = CharacterForNativeCode(keyboardLayout, virtualKeyCode, (1 << optionKeyBit));
-      Local<Value> withAltGraphShift = CharacterForNativeCode(keyboardLayout, virtualKeyCode, (1 << shiftKeyBit) | (1 << optionKeyBit));
+      Napi::Value unmodified = CharacterForNativeCode(env, keyboardLayout, virtualKeyCode, 0);
+      Napi::Value withShift = CharacterForNativeCode(env, keyboardLayout, virtualKeyCode, (1 << shiftKeyBit));
+      Napi::Value withAltGraph = CharacterForNativeCode(env, keyboardLayout, virtualKeyCode, (1 << optionKeyBit));
+      Napi::Value withAltGraphShift = CharacterForNativeCode(env, keyboardLayout, virtualKeyCode, (1 << shiftKeyBit) | (1 << optionKeyBit));
 
-      if (unmodified->IsString() || withShift->IsString() || withAltGraph->IsString() || withAltGraphShift->IsString()) {
-        Local<Object> entry = Nan::New<Object>();
-        Nan::Set(entry, unmodifiedKey, unmodified);
-        Nan::Set(entry, withShiftKey, withShift);
-        Nan::Set(entry, withAltGraphKey, withAltGraph);
-        Nan::Set(entry, withAltGraphShiftKey, withAltGraphShift);
+      if (unmodified.IsString() || withShift.IsString() || withAltGraph.IsString() || withAltGraphShift.IsString()) {
+        auto entry = Napi::Object::New(env);
+        entry.Set("unmodified", unmodified);
+        entry.Set("withShift", withShift);
+        entry.Set("withAltGraph", withAltGraph);
+        entry.Set("withAltGraphShift", withAltGraphShift);
+        result.Set(dom3CodeKey, entry);
 
-        Nan::Set(result, dom3CodeKey, entry);
+        // Nan::Set(result, dom3CodeKey, entry);
       }
     }
   }
-
-  info.GetReturnValue().Set(result);
+  return result;
 }

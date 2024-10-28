@@ -6,17 +6,18 @@
 #include <cwctype>
 #include <cctype>
 
-KeyboardLayoutManager::KeyboardLayoutManager(v8::Isolate *isolate, Nan::Callback *callback) : xInputContext{nullptr}, xInputMethod{nullptr}, isolate_(isolate), callback{callback} {
+KeyboardLayoutManager::PlatformSetup(const Napi::CallbackInfo& info) {
+  auto env = info.Env();
+
   xDisplay = XOpenDisplay("");
-  if (!xDisplay) {
-    Nan::ThrowError("Could not connect to X display.");
-    return;
-  }
+  CHECK_VOID(
+    xDisplay,
+    "Could not connect to X display",
+    env
+  );
 
   xInputMethod = XOpenIM(xDisplay, 0, 0, 0);
-  if (!xInputMethod) {
-    return;
-  }
+  if (!xInputMethod) return;
 
   XIMStyles* styles = 0;
   if (XGetIMValues(xInputMethod, XNQueryInputStyle, &styles, NULL) || !styles) {
@@ -33,9 +34,7 @@ KeyboardLayoutManager::KeyboardLayoutManager(v8::Isolate *isolate, Nan::Callback
     }
   }
   XFree(styles);
-  if (!bestMatchStyle) {
-    return;
-  }
+  if (!bestMatchStyle) return;
 
   Window window;
   int revert_to;
@@ -48,7 +47,7 @@ KeyboardLayoutManager::KeyboardLayoutManager(v8::Isolate *isolate, Nan::Callback
   }
 }
 
-KeyboardLayoutManager::~KeyboardLayoutManager() {
+KeyboardLayoutManager::PlatformTeardown() {
   if (xInputContext) {
     XDestroyIC(xInputContext);
   }
@@ -64,10 +63,10 @@ KeyboardLayoutManager::~KeyboardLayoutManager() {
 void KeyboardLayoutManager::HandleKeyboardLayoutChanged() {
 }
 
-NAN_METHOD(KeyboardLayoutManager::GetCurrentKeyboardLayout) {
-  Nan::HandleScope scope;
-  KeyboardLayoutManager* manager = Nan::ObjectWrap::Unwrap<KeyboardLayoutManager>(info.Holder());
-  v8::Local<v8::Value> result;
+Napi::Value KeyboardLayoutManager::GetCurrentKeyboardLayout(const Napi::CallbackInfo& info) {
+  Napi::HandleScope scope(env);
+  KeyboardLayoutManager* manager = info.Holder().Unwrap<KeyboardLayoutManager>();
+  Napi::Value result;
 
   XkbRF_VarDefsRec vdr;
   char *tmp = NULL;
@@ -75,26 +74,27 @@ NAN_METHOD(KeyboardLayoutManager::GetCurrentKeyboardLayout) {
     XkbStateRec xkbState;
     XkbGetState(manager->xDisplay, XkbUseCoreKbd, &xkbState);
     if (vdr.variant) {
-      result = Nan::New<v8::String>(std::string(vdr.layout) + "," + std::string(vdr.variant) + " [" + std::to_string(xkbState.group) + "]").ToLocalChecked();
+      result = Napi::String::New(env, std::string(vdr.layout) + "," + std::string(vdr.variant) + " [" + std::to_string(xkbState.group) + "]");
     } else {
-      result = Nan::New<v8::String>(std::string(vdr.layout) + " [" + std::to_string(xkbState.group) + "]").ToLocalChecked();
+      result = Napi::String::New(env, std::string(vdr.layout) + " [" + std::to_string(xkbState.group) + "]");
     }
   } else {
-    result = Nan::Null();
+    result = env.Null();
   }
 
-  info.GetReturnValue().Set(result);
+  return result;
 
   return;
 }
 
-NAN_METHOD(KeyboardLayoutManager::GetCurrentKeyboardLanguage) {
+Napi::Value KeyboardLayoutManager::GetCurrentKeyboardLanguage(const Napi::CallbackInfo& info) {
+  // No distinction between “language” and “layout” on Linux.
   return GetCurrentKeyboardLayout(info);
 }
 
-NAN_METHOD(KeyboardLayoutManager::GetInstalledKeyboardLanguages) {
-  Nan::HandleScope scope;
-  return;
+Napi::Value KeyboardLayoutManager::GetInstalledKeyboardLanguages(const Napi::CallbackInfo& info) {
+  Napi::HandleScope scope(env);
+  return env.Undefined();
 }
 
 struct KeycodeMapEntry {
@@ -107,7 +107,7 @@ struct KeycodeMapEntry {
 
 #include "keycode_converter_data.inc"
 
-v8::Local<v8::Value> CharacterForNativeCode(XIC xInputContext, XKeyEvent *keyEvent, uint xkbKeycode, uint state) {
+Napi::Value CharacterForNativeCode(XIC xInputContext, XKeyEvent *keyEvent, uint xkbKeycode, uint state) {
   keyEvent->keycode = xkbKeycode;
   keyEvent->state = state;
 
@@ -115,30 +115,30 @@ v8::Local<v8::Value> CharacterForNativeCode(XIC xInputContext, XKeyEvent *keyEve
     wchar_t characters[2];
     int count = XwcLookupString(xInputContext, keyEvent, characters, 2, NULL, NULL);
     if (count > 0 && !std::iswcntrl(characters[0])) {
-      return Nan::New<v8::String>(reinterpret_cast<const uint16_t *>(characters), count).ToLocalChecked();
+      return Napi::String::New(env, reinterpret_cast<const uint16_t *>(characters), count);
     } else {
-      return Nan::Null();
+      return env.Null();
     }
   } else {
-    // Graceful fallback for systems where no window is open or no input context
-    // can be found.
+    // Graceful fallback for systems where no window is open or no input
+    // context can be found.
     char characters[2];
     int count = XLookupString(keyEvent, characters, 2, NULL, NULL);
     if (count > 0 && !std::iscntrl(characters[0])) {
-      return Nan::New<v8::String>(reinterpret_cast<const uint16_t *>(characters), count).ToLocalChecked();
+      return Napi::String::New(env, reinterpret_cast<const uint16_t *>(characters), count);
     } else {
-      return Nan::Null();
+      return env.Null();
     }
   }
 }
 
-NAN_METHOD(KeyboardLayoutManager::GetCurrentKeymap) {
-  v8::Local<v8::Object> result = Nan::New<v8::Object>();
-  KeyboardLayoutManager* manager = Nan::ObjectWrap::Unwrap<KeyboardLayoutManager>(info.Holder());
-  v8::Local<v8::String> unmodifiedKey = Nan::New("unmodified").ToLocalChecked();
-  v8::Local<v8::String> withShiftKey = Nan::New("withShift").ToLocalChecked();
+Napi::Value KeyboardLayoutManager::GetCurrentKeymap(const Napi::CallbackInfo& info) {
+  Napi::Object result = Napi::Object::New(env);
+  KeyboardLayoutManager* manager = info.Holder().Unwrap<KeyboardLayoutManager>();
+  Napi::String unmodifiedKey = Napi::String::New(env, "unmodified");
+  Napi::String withShiftKey = Napi::String::New(env, "withShift");
 
-  // Clear cached keymap
+  // Clear cached keymap.
   XMappingEvent eventMap = {MappingNotify, 0, false, manager->xDisplay, 0, MappingKeyboard, 0, 0};
   XRefreshKeyboardMapping(&eventMap);
 
@@ -151,7 +151,7 @@ NAN_METHOD(KeyboardLayoutManager::GetCurrentKeymap) {
     keyboardBaseState = 0x4000;
   }
 
-  // Set up an event to reuse across CharacterForNativeCode calls
+  // Set up an event to reuse across CharacterForNativeCode calls.
   XEvent event;
   memset(&event, 0, sizeof(XEvent));
   XKeyEvent* keyEvent = &event.xkey;
@@ -164,18 +164,18 @@ NAN_METHOD(KeyboardLayoutManager::GetCurrentKeymap) {
     uint xkbKeycode = keyCodeMap[i].xkbKeycode;
 
     if (dom3Code && xkbKeycode > 0x0000) {
-      v8::Local<v8::String> dom3CodeKey = Nan::New(dom3Code).ToLocalChecked();
-      v8::Local<v8::Value> unmodified = CharacterForNativeCode(manager->xInputContext, keyEvent, xkbKeycode, keyboardBaseState);
-      v8::Local<v8::Value> withShift = CharacterForNativeCode(manager->xInputContext, keyEvent, xkbKeycode, keyboardBaseState | ShiftMask);
+      Napi::String dom3CodeKey = Napi::New(env, dom3Code);
+      Napi::Value unmodified = CharacterForNativeCode(manager->xInputContext, keyEvent, xkbKeycode, keyboardBaseState);
+      Napi::Value withShift = CharacterForNativeCode(manager->xInputContext, keyEvent, xkbKeycode, keyboardBaseState | ShiftMask);
 
-      if (unmodified->IsString() || withShift->IsString()) {
-        v8::Local<v8::Object> entry = Nan::New<v8::Object>();
-        Nan::Set(entry, unmodifiedKey, unmodified);
-        Nan::Set(entry, withShiftKey, withShift);
-        Nan::Set(result, dom3CodeKey, entry);
+      if (unmodified.IsString() || withShift.IsString()) {
+        Napi::Object entry = Napi::Object::New(env);
+        (entry).Set(unmodifiedKey, unmodified);
+        (entry).Set(withShiftKey, withShift);
+        (result).Set(dom3CodeKey, entry);
       }
     }
   }
 
-  info.GetReturnValue().Set(result);
+  return result;
 }

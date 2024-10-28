@@ -20,8 +20,8 @@
     }
   ],
   "dependencies": {
-    "event-kit": "^2.0.0",
-    "nan": "^2.13.2"
+    "node-addon-api": "8.2.1",
+    "event-kit": "^2.0.0"
   },
   "devDependencies": {
     "jasmine-focused": "^1.0.4"
