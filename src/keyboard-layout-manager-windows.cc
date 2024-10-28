@@ -113,6 +113,10 @@ void KeyboardLayoutManager::PlatformSetup(const Napi::CallbackInfo& info) {
   // no-op
 }
 
+void KeyboardLayoutManager::PlatformTeardown() {
+  // no-op
+};
+
 struct KeycodeMapEntry {
   UINT scanCode;
   const char *dom3Code;
@@ -157,11 +161,12 @@ Napi::Value CharacterForNativeCode(
     keyboardState[VK_MENU] = 0x0;
     keyboardState[VK_CONTROL] = 0x0;
 
-    // Clear dead key out of kernel-mode keyboard buffer so subsequent translations are not affected
+    // Clear dead key out of kernel-mode keyboard buffer so subsequent
+    // translations are not affected.
     UINT spaceKeyCode = MapVirtualKeyEx(SPACE_SCAN_CODE, MAPVK_VSC_TO_VK, keyboardLayout);
     ToUnicodeEx(spaceKeyCode, SPACE_SCAN_CODE, keyboardState, characters, 5, 0, keyboardLayout);
 
-    // Don't translate dead keys
+    // Don't translate dead keys.
     return env.Null();
   } else if (count > 0 && !std::iswcntrl(characters[0])) {
     int utf8Len = WideCharToMultiByte(CP_UTF8, 0, characters, count, NULL, 0, NULL, NULL);
@@ -193,10 +198,15 @@ Napi::Value KeyboardLayoutManager::GetCurrentKeymap(const Napi::CallbackInfo& in
 
       // Detect and skip dead keys. If the most significant bit of the returned
       // character value is 1, this is a dead key. Trying to translate it to a
-      // character will mutate the Windows keyboard buffer and blow away pending
-      // dead keys. To avoid this bug, we just refuse to map dead keys to
-      // characters.
-      if ((MapVirtualKeyEx(keyCode, MAPVK_VK_TO_CHAR, keyboardLayout) >> (sizeof(UINT) * 8 - 1))) continue;
+      // character will mutate the Windows keyboard buffer and blow away
+      // pending dead keys. To avoid this bug, we just refuse to map dead keys
+      // to characters.
+      if (
+        (MapVirtualKeyEx(keyCode, MAPVK_VK_TO_CHAR, keyboardLayout) >>
+        (sizeof(UINT) * 8 - 1))
+      ) {
+        continue;
+      }
 
       Napi::String dom3CodeKey = Napi::String::New(env, dom3Code);
       Napi::Value unmodified = CharacterForNativeCode(env, keyboardLayout, keyCode, scanCode, keyboardState, false, false);
