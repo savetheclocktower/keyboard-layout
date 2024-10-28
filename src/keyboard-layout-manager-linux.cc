@@ -6,7 +6,7 @@
 #include <cwctype>
 #include <cctype>
 
-KeyboardLayoutManager::PlatformSetup(const Napi::CallbackInfo& info) {
+void KeyboardLayoutManager::PlatformSetup(const Napi::CallbackInfo& info) {
   auto env = info.Env();
 
   xDisplay = XOpenDisplay("");
@@ -65,14 +65,13 @@ void KeyboardLayoutManager::HandleKeyboardLayoutChanged() {
 
 Napi::Value KeyboardLayoutManager::GetCurrentKeyboardLayout(const Napi::CallbackInfo& info) {
   Napi::HandleScope scope(env);
-  KeyboardLayoutManager* manager = info.Holder().Unwrap<KeyboardLayoutManager>();
   Napi::Value result;
 
   XkbRF_VarDefsRec vdr;
   char *tmp = NULL;
-  if (XkbRF_GetNamesProp(manager->xDisplay, &tmp, &vdr) && vdr.layout) {
+  if (XkbRF_GetNamesProp(xDisplay, &tmp, &vdr) && vdr.layout) {
     XkbStateRec xkbState;
-    XkbGetState(manager->xDisplay, XkbUseCoreKbd, &xkbState);
+    XkbGetState(xDisplay, XkbUseCoreKbd, &xkbState);
     if (vdr.variant) {
       result = Napi::String::New(env, std::string(vdr.layout) + "," + std::string(vdr.variant) + " [" + std::to_string(xkbState.group) + "]");
     } else {
@@ -134,16 +133,15 @@ Napi::Value CharacterForNativeCode(XIC xInputContext, XKeyEvent *keyEvent, uint 
 
 Napi::Value KeyboardLayoutManager::GetCurrentKeymap(const Napi::CallbackInfo& info) {
   Napi::Object result = Napi::Object::New(env);
-  KeyboardLayoutManager* manager = info.Holder().Unwrap<KeyboardLayoutManager>();
   Napi::String unmodifiedKey = Napi::String::New(env, "unmodified");
   Napi::String withShiftKey = Napi::String::New(env, "withShift");
 
   // Clear cached keymap.
-  XMappingEvent eventMap = {MappingNotify, 0, false, manager->xDisplay, 0, MappingKeyboard, 0, 0};
+  XMappingEvent eventMap = {MappingNotify, 0, false, xDisplay, 0, MappingKeyboard, 0, 0};
   XRefreshKeyboardMapping(&eventMap);
 
   XkbStateRec xkbState;
-  XkbGetState(manager->xDisplay, XkbUseCoreKbd, &xkbState);
+  XkbGetState(xDisplay, XkbUseCoreKbd, &xkbState);
   uint keyboardBaseState = 0x0000;
   if (xkbState.group == 1) {
     keyboardBaseState = 0x2000;
@@ -155,7 +153,7 @@ Napi::Value KeyboardLayoutManager::GetCurrentKeymap(const Napi::CallbackInfo& in
   XEvent event;
   memset(&event, 0, sizeof(XEvent));
   XKeyEvent* keyEvent = &event.xkey;
-  keyEvent->display = manager->xDisplay;
+  keyEvent->display = xDisplay;
   keyEvent->type = KeyPress;
 
   size_t keyCodeMapSize = sizeof(keyCodeMap) / sizeof(keyCodeMap[0]);
@@ -165,8 +163,8 @@ Napi::Value KeyboardLayoutManager::GetCurrentKeymap(const Napi::CallbackInfo& in
 
     if (dom3Code && xkbKeycode > 0x0000) {
       Napi::String dom3CodeKey = Napi::New(env, dom3Code);
-      Napi::Value unmodified = CharacterForNativeCode(manager->xInputContext, keyEvent, xkbKeycode, keyboardBaseState);
-      Napi::Value withShift = CharacterForNativeCode(manager->xInputContext, keyEvent, xkbKeycode, keyboardBaseState | ShiftMask);
+      Napi::Value unmodified = CharacterForNativeCode(xInputContext, keyEvent, xkbKeycode, keyboardBaseState);
+      Napi::Value withShift = CharacterForNativeCode(xInputContext, keyEvent, xkbKeycode, keyboardBaseState | ShiftMask);
 
       if (unmodified.IsString() || withShift.IsString()) {
         Napi::Object entry = Napi::Object::New(env);
