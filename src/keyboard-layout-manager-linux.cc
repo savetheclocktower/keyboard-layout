@@ -115,7 +115,7 @@ Napi::Value CharacterForNativeCode(Napi::Env env, XIC xInputContext, XKeyEvent *
     wchar_t characters[2];
     char utf8[MB_CUR_MAX * 2 + 1];
     int count = XwcLookupString(xInputContext, keyEvent, characters, 2, NULL, NULL);
-    size_t len = wcstombs(utf8, chars, sizeof(utf8));
+    size_t len = wcstombs(utf8, characters, sizeof(utf8));
     if (len == (size_t)-1) {
       return env.Null();
     }
@@ -136,7 +136,7 @@ Napi::Value CharacterForNativeCode(Napi::Env env, XIC xInputContext, XKeyEvent *
     if (count > 0 && !std::iscntrl(characters[0])) {
       return Napi::String::New(
         env,
-        std::string(chars, count)
+        std::string(characters, count)
       );
     } else {
       return env.Null();
