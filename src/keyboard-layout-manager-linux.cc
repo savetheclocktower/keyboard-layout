@@ -57,7 +57,7 @@ void KeyboardLayoutManager::PlatformTeardown() {
   }
 
   XCloseDisplay(xDisplay);
-  delete callback;
+  callback.Reset();
 };
 
 void KeyboardLayoutManager::HandleKeyboardLayoutChanged() {
@@ -106,15 +106,25 @@ struct KeycodeMapEntry {
 
 #include "keycode_converter_data.inc"
 
+
 Napi::Value CharacterForNativeCode(Napi::Env env, XIC xInputContext, XKeyEvent *keyEvent, uint xkbKeycode, uint state) {
   keyEvent->keycode = xkbKeycode;
   keyEvent->state = state;
 
   if (xInputContext) {
     wchar_t characters[2];
+    char utf8[MB_CUR_MAX * 2 + 1];
     int count = XwcLookupString(xInputContext, keyEvent, characters, 2, NULL, NULL);
+    size_t len = wcstombs(utf8, chars, sizeof(utf8));
+    if (len == (size_t)-1) {
+      return env.Null();
+    }
+
     if (count > 0 && !std::iswcntrl(characters[0])) {
-      return Napi::String::New(env, reinterpret_cast<const uint16_t *>(characters), count);
+      return Napi::String::New(
+        env,
+        std::string(utf8, len)
+      );
     } else {
       return env.Null();
     }
@@ -124,7 +134,10 @@ Napi::Value CharacterForNativeCode(Napi::Env env, XIC xInputContext, XKeyEvent *
     char characters[2];
     int count = XLookupString(keyEvent, characters, 2, NULL, NULL);
     if (count > 0 && !std::iscntrl(characters[0])) {
-      return Napi::String::New(env, reinterpret_cast<const uint16_t *>(characters), count);
+      return Napi::String::New(
+        env,
+        std::string(chars, count)
+      );
     } else {
       return env.Null();
     }
