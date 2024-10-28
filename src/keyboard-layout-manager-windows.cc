@@ -15,19 +15,19 @@
 using namespace Napi;
 
 std::string ToUTF8(const std::wstring& string) {
-  if (string.Length() < 1) {
+  if (string.length() < 1) {
     return std::string();
   }
 
   // NB: In the pathological case, each character could expand up
   // to 4 bytes in UTF8.
-  int cbLen = (string.Length()+1) * sizeof(char) * 4;
+  int cbLen = (string.length()+1) * sizeof(char) * 4;
   char* buf = new char[cbLen];
   int retLen = WideCharToMultiByte(
     CP_UTF8,
     0,
     string.c_str(),
-    string.Length(),
+    -1,
     buf,
     cbLen,
     NULL,
