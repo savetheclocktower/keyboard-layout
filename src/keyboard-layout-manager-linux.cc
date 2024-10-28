@@ -47,7 +47,7 @@ void KeyboardLayoutManager::PlatformSetup(const Napi::CallbackInfo& info) {
   }
 }
 
-KeyboardLayoutManager::PlatformTeardown() {
+void KeyboardLayoutManager::PlatformTeardown() {
   if (xInputContext) {
     XDestroyIC(xInputContext);
   }
@@ -64,6 +64,7 @@ void KeyboardLayoutManager::HandleKeyboardLayoutChanged() {
 }
 
 Napi::Value KeyboardLayoutManager::GetCurrentKeyboardLayout(const Napi::CallbackInfo& info) {
+  auto env = info.Env();
   Napi::HandleScope scope(env);
   Napi::Value result;
 
@@ -82,8 +83,6 @@ Napi::Value KeyboardLayoutManager::GetCurrentKeyboardLayout(const Napi::Callback
   }
 
   return result;
-
-  return;
 }
 
 Napi::Value KeyboardLayoutManager::GetCurrentKeyboardLanguage(const Napi::CallbackInfo& info) {
@@ -92,6 +91,7 @@ Napi::Value KeyboardLayoutManager::GetCurrentKeyboardLanguage(const Napi::Callba
 }
 
 Napi::Value KeyboardLayoutManager::GetInstalledKeyboardLanguages(const Napi::CallbackInfo& info) {
+  auto env = info.Env();
   Napi::HandleScope scope(env);
   return env.Undefined();
 }
@@ -106,7 +106,7 @@ struct KeycodeMapEntry {
 
 #include "keycode_converter_data.inc"
 
-Napi::Value CharacterForNativeCode(XIC xInputContext, XKeyEvent *keyEvent, uint xkbKeycode, uint state) {
+Napi::Value CharacterForNativeCode(Napi::Env env, XIC xInputContext, XKeyEvent *keyEvent, uint xkbKeycode, uint state) {
   keyEvent->keycode = xkbKeycode;
   keyEvent->state = state;
 
@@ -132,6 +132,7 @@ Napi::Value CharacterForNativeCode(XIC xInputContext, XKeyEvent *keyEvent, uint 
 }
 
 Napi::Value KeyboardLayoutManager::GetCurrentKeymap(const Napi::CallbackInfo& info) {
+  auto env = info.Env();
   Napi::Object result = Napi::Object::New(env);
   Napi::String unmodifiedKey = Napi::String::New(env, "unmodified");
   Napi::String withShiftKey = Napi::String::New(env, "withShift");
@@ -162,9 +163,9 @@ Napi::Value KeyboardLayoutManager::GetCurrentKeymap(const Napi::CallbackInfo& in
     uint xkbKeycode = keyCodeMap[i].xkbKeycode;
 
     if (dom3Code && xkbKeycode > 0x0000) {
-      Napi::String dom3CodeKey = Napi::New(env, dom3Code);
-      Napi::Value unmodified = CharacterForNativeCode(xInputContext, keyEvent, xkbKeycode, keyboardBaseState);
-      Napi::Value withShift = CharacterForNativeCode(xInputContext, keyEvent, xkbKeycode, keyboardBaseState | ShiftMask);
+      Napi::String dom3CodeKey = Napi::String::New(env, dom3Code);
+      Napi::Value unmodified = CharacterForNativeCode(env, xInputContext, keyEvent, xkbKeycode, keyboardBaseState);
+      Napi::Value withShift = CharacterForNativeCode(env, xInputContext, keyEvent, xkbKeycode, keyboardBaseState | ShiftMask);
 
       if (unmodified.IsString() || withShift.IsString()) {
         Napi::Object entry = Napi::Object::New(env);
