@@ -31,6 +31,7 @@ jobs:
         # are incompatible with Python 3.12+, which no-longer ships 'distutils'
         # out of the box. 'setuptools' package provides 'distutils'.
         run: python3 -m pip install setuptools
+        if: ${{ matrix.os != "macos-latest" }}
 
       - name: Install dependencies
         run: npm install
