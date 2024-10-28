@@ -33,6 +33,13 @@ jobs:
         run: python3 -m pip install setuptools
         if: ${{ matrix.os != "macos-latest" }}
 
+      - name: Install Python setuptools (macOS)
+        # This is needed for Python 3.12+, since many versions of node-gyp
+        # are incompatible with Python 3.12+, which no-longer ships 'distutils'
+        # out of the box. 'setuptools' package provides 'distutils'.
+        run: brew install python-setuptools
+        if: ${{ matrix.os == "macos-latest" }}
+
       - name: Install dependencies
         run: npm install
 
