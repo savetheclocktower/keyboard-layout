@@ -168,12 +168,9 @@ Napi::Value CharacterForNativeCode(
     if (utf8Len == 0) {
       return env.Null();
     }
-    char utf8[utf8Len];
-    WideCharToMultiByte(CP_UTF8, 0, characters, count, utf8, utf8Len, NULL, NULL);
-    return Napi::String::New(
-      env,
-      std::string(utf8, utf8Len)
-    );
+    std::string utf8(utf8Len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, characters, count, &utf8[0], utf8Len, NULL, NULL);
+    return Napi::String::New(env, utf8);
   } else {
     return env.Null();
   }
@@ -201,7 +198,7 @@ Napi::Value KeyboardLayoutManager::GetCurrentKeymap(const Napi::CallbackInfo& in
       // characters.
       if ((MapVirtualKeyEx(keyCode, MAPVK_VK_TO_CHAR, keyboardLayout) >> (sizeof(UINT) * 8 - 1))) continue;
 
-      Napi::String dom3CodeKey = Napi::New(env, dom3Code);
+      Napi::String dom3CodeKey = Napi::String::New(env, dom3Code);
       Napi::Value unmodified = CharacterForNativeCode(env, keyboardLayout, keyCode, scanCode, keyboardState, false, false);
       Napi::Value withShift = CharacterForNativeCode(env, keyboardLayout, keyCode, scanCode, keyboardState, true, false);
       Napi::Value withAltGraph = CharacterForNativeCode(env, keyboardLayout, keyCode, scanCode, keyboardState, false, true);
